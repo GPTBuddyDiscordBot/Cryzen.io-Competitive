@@ -17,7 +17,7 @@
 (function () {
   "use strict";
 
-  const WSS_URL = GM_getValue("wss_url", "wss://cryzen-io-competitive.onrender.com/");
+  const WSS_URL = GM_getValue("wss_url", "wss://cryzen-io-competitive.onrender.com/ws");
   const HOTKEY_TOGGLE = GM_getValue("hotkey", "F2");
 
   const RANKS = [
@@ -211,8 +211,14 @@
     };
   }
 
+  let lastNotifText = "";
+  let lastNotifTime = 0;
   function addNotification(text, type = "info") {
-    notifications.push({ id: Date.now(), text, type });
+    const now = Date.now();
+    if (text === lastNotifText && now - lastNotifTime < 3000) return;
+    lastNotifText = text;
+    lastNotifTime = now;
+    notifications.push({ id: now, text, type });
     if (notifications.length > 20) notifications.shift();
     updateGUI();
   }
@@ -348,73 +354,37 @@
   let lastKillFeedText = "";
 
   function detectDOMChanges() {
-    detectMatchStartDOM();
     detectDeathScreenDOM();
-    detectMatchEndDOM();
     detectKillFeedDOM();
     detectScoreboardDOM();
   }
 
   function detectMatchStartDOM() {
-    if (matchTracking.inMatch) return;
-    const gameEls = document.querySelectorAll('[class*="game"], [class*="Game"], canvas');
-    let visibleGameEls = 0;
-    for (const el of gameEls) {
-      if (el.offsetHeight > 400 && el.offsetWidth > 400) visibleGameEls++;
-    }
-    if (visibleGameEls >= 1) {
-      onMatchStart();
-    }
+    return;
   }
 
   function detectDeathScreenDOM() {
     if (!matchTracking.inMatch) return;
     const now = Date.now();
-    if (now - lastDeathScreenSeen < 3000) return;
+    if (now - lastDeathScreenSeen < 5000) return;
 
     const allEls = document.querySelectorAll("*");
     for (const el of allEls) {
+      if (el.offsetHeight <= 0 || el.offsetWidth <= 0) continue;
       const cls = (el.className || "").toString().toLowerCase();
       const text = (el.textContent || "").toLowerCase();
-      if (el.offsetHeight > 0 && el.offsetWidth > 0) {
-        if ((cls.includes("death") || cls.includes("dead") || cls.includes("respawn") || cls.includes("kill-screen")) &&
-            (text.includes("respawn") || text.includes("death") || text.includes("killed") || text.includes("dead") || text.includes("click to"))) {
-          matchTracking.deaths++;
-          lastDeathScreenSeen = now;
-          addNotification("Death detected", "info");
-          updateGUI();
-          return;
-        }
+      if ((cls.includes("death") || cls.includes("dead") || cls.includes("respawn")) &&
+          (text.includes("respawn") || text.includes("click to"))) {
+        matchTracking.deaths++;
+        lastDeathScreenSeen = now;
+        updateGUI();
+        return;
       }
     }
   }
 
   function detectMatchEndDOM() {
-    if (!matchTracking.inMatch) return;
-    const now = Date.now();
-    if (now - lastMatchEndSeen < 5000) return;
-
-    const allEls = document.querySelectorAll("*");
-    for (const el of allEls) {
-      const cls = (el.className || "").toString().toLowerCase();
-      const text = (el.textContent || "").toLowerCase();
-      if (el.offsetHeight > 0 && el.offsetWidth > 0) {
-        if (cls.includes("reward") || cls.includes("result") || cls.includes("end-screen") || cls.includes("match-end")) {
-          if (text.includes("reward") || text.includes("match") || text.includes("result") || text.includes("xp") || text.includes("credit") || text.includes("claim")) {
-            const won = text.includes("win") || text.includes("victory") || text.includes("1st") || text.includes("defeated");
-            lastMatchEndSeen = now;
-            onMatchEnd(won);
-            return;
-          }
-        }
-        if (text.includes("match result") || text.includes("match ended") || text.includes("reward claim")) {
-          const won = text.includes("win") || text.includes("victory");
-          lastMatchEndSeen = now;
-          onMatchEnd(won);
-          return;
-        }
-      }
-    }
+    return;
   }
 
   function detectKillFeedDOM() {
@@ -423,7 +393,7 @@
     const currentText = [];
     for (const el of allEls) {
       const cls = (el.className || "").toString().toLowerCase();
-      if (cls.includes("kill") || cls.includes("death") || cls.includes("chat") || cls.includes("feed") || cls.includes("message") || cls.includes("log")) {
+      if (cls.includes("kill-feed") || cls.includes("killfeed") || cls.includes("death-log")) {
         const txt = (el.textContent || "").trim();
         if (txt.length > 0 && txt.length < 200) currentText.push(txt);
       }
@@ -436,9 +406,6 @@
         if (lower.includes("headshot") || lower.includes("head shot")) {
           matchTracking.kills++;
           matchTracking.headshots++;
-          updateGUI();
-        } else if (lower.includes("killed") || (lower.includes("kill") && !lower.includes("death"))) {
-          matchTracking.kills++;
           updateGUI();
         }
       }
@@ -483,13 +450,15 @@
 
   function onMatchStart() {
     if (matchTracking.inMatch) return;
+    const now = Date.now();
+    if (now - lastMatchEndSeen < 10000) return;
     matchTracking = {
       inMatch: true,
       kills: 0,
       deaths: 0,
       headshots: 0,
       won: false,
-      matchStart: Date.now(),
+      matchStart: now,
       lastKnownKills: 0,
       lastKnownDeaths: 0,
       lastKnownHeadshots: 0,
@@ -498,19 +467,23 @@
     lastKillFeedText = "";
     lastDeathScreenSeen = 0;
     lastMatchEndSeen = 0;
-    addNotification("Match started - tracking stats", "info");
+    addNotification("Match started", "info");
     updateGUI();
     scheduleStateScan();
   }
 
   function onMatchEnd(won) {
     if (!matchTracking.inMatch) return;
+    const now = Date.now();
+    if (now - lastMatchEndSeen < 5000) return;
+    lastMatchEndSeen = now;
     matchTracking.won = won;
     if (matchTracking.kills === 0 && matchTracking.deaths === 0) {
       autoDetectMatchStats();
     }
+    matchTracking.inMatch = false;
     setTimeout(() => {
-      addNotification(`Match ended - ${matchTracking.won ? "WIN" : "LOSS"}: ${matchTracking.kills}K/${matchTracking.deaths}D/${matchTracking.headshots}HS`, matchTracking.won ? "achievement" : "info");
+      addNotification("Match ended - " + (matchTracking.won ? "WIN" : "LOSS") + ": " + matchTracking.kills + "K/" + matchTracking.deaths + "D/" + matchTracking.headshots + "HS", matchTracking.won ? "achievement" : "info");
       submitMatchResult();
       updateGUI();
     }, 1500);
@@ -597,8 +570,7 @@
     periodicTracker = setInterval(() => {
       if (!matchTracking.inMatch) return;
       scanGameState();
-      detectDOMChanges();
-    }, 1500);
+    }, 3000);
   }
 
   function scheduleStateScan() {
