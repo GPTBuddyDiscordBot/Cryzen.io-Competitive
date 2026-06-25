@@ -856,7 +856,7 @@
         <button data-tab="matches">Matches</button>
         <button data-tab="leaderboard">Leaderboard</button>
         <button data-tab="season">Season</button>
-        <button data-tab="manual">Submit</button>
+        <button data-tab="manual">Stats</button>
       </div>
       <div id="cc-body"></div>
     `;
@@ -1092,37 +1092,22 @@
     const hasTracked = tracked.kills > 0 || tracked.deaths > 0;
     body.innerHTML = `
       <div class="cc-section">
-        <div class="cc-section-title">Auto-Tracked Match</div>
+        <div class="cc-section-title">Auto-Detected Stats</div>
         ${hasTracked ? `
-          <p style="font-size:11px;color:#888;margin-bottom:8px;">Last detected match stats. Click to submit.</p>
-          <div class="cc-manual-form">
-            <label>Kills</label><input type="number" id="cc-man-kills" value="${tracked.kills}" min="0">
-            <label>Deaths</label><input type="number" id="cc-man-deaths" value="${tracked.deaths}" min="0">
-            <label>Headshots</label><input type="number" id="cc-man-hs" value="${tracked.headshots}" min="0">
-            <label>Result</label>
-            <select id="cc-man-won">
-              <option value="true" ${tracked.won ? "selected" : ""}>Win</option>
-              <option value="false" ${!tracked.won ? "selected" : ""}>Loss</option>
-            </select>
-            <br>
-            <button class="cc-manual-submit-btn" id="cc-man-submit">Submit This Match</button>
+          <div class="cc-stats-grid">
+            <div class="cc-stat-item"><div class="cc-stat-label">Kills</div><div class="cc-stat-value" style="color:#4CAF50">${tracked.kills}</div></div>
+            <div class="cc-stat-item"><div class="cc-stat-label">Deaths</div><div class="cc-stat-value" style="color:#F44336">${tracked.deaths}</div></div>
+            <div class="cc-stat-item"><div class="cc-stat-label">Headshots</div><div class="cc-stat-value" style="color:#FFD700">${tracked.headshots}</div></div>
+            <div class="cc-stat-item"><div class="cc-stat-label">Result</div><div class="cc-stat-value" style="color:${tracked.won ? '#4CAF50' : '#F44336'}">${tracked.won ? "WIN" : "LOSS"}</div></div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:10px;">
+            <button class="cc-manual-submit-btn" id="cc-man-submit-win" style="background:#4CAF50">Submit as WIN</button>
+            <button class="cc-manual-submit-btn" id="cc-man-submit-loss" style="background:#F44336">Submit as LOSS</button>
           </div>
         ` : `
-          <p style="font-size:11px;color:#888;margin-bottom:8px;">No tracked match data yet. Enter manually or wait for auto-detection.</p>
-          <div class="cc-manual-form">
-            <label>Kills</label><input type="number" id="cc-man-kills" value="0" min="0">
-            <label>Deaths</label><input type="number" id="cc-man-deaths" value="0" min="0">
-            <label>Headshots</label><input type="number" id="cc-man-hs" value="0" min="0">
-            <label>Result</label>
-            <select id="cc-man-won">
-              <option value="true">Win</option>
-              <option value="false">Loss</option>
-            </select>
-            <br>
-            <button class="cc-manual-submit-btn" id="cc-man-submit">Submit Match</button>
-          </div>
+          <p style="font-size:12px;color:#888;text-align:center;padding:12px;">No match data detected yet.<br>Stats auto-track during gameplay.</p>
         `}
-        <button class="cc-manual-submit-btn" id="cc-man-autodetect" style="background:#444;margin-top:8px;display:block;">Auto-Detect From Page</button>
+        <button class="cc-manual-submit-btn" id="cc-man-autodetect" style="background:#444;margin-top:10px;display:block;width:100%">Scan Page For Stats</button>
       </div>
       <div class="cc-section">
         <div class="cc-section-title">Connection</div>
@@ -1140,19 +1125,22 @@
       </div>
     `;
 
-    const submitBtn = document.getElementById("cc-man-submit");
-    if (submitBtn) {
-      submitBtn.addEventListener("click", () => {
-        const kills = parseInt(document.getElementById("cc-man-kills").value) || 0;
-        const deaths = parseInt(document.getElementById("cc-man-deaths").value) || 0;
-        const headshots = parseInt(document.getElementById("cc-man-hs").value) || 0;
-        const won = document.getElementById("cc-man-won").value === "true";
-        sendWS("submit_match", { kills, deaths, headshots, won });
-        addNotification("Match submitted: " + kills + "K/" + deaths + "D/" + headshots + "HS", "achievement");
-        if (hasTracked) {
-          matchTracking = { inMatch: false, kills: 0, deaths: 0, headshots: 0, won: false, matchStart: 0, lastKnownKills: 0, lastKnownDeaths: 0, lastKnownHeadshots: 0 };
-          setTimeout(() => renderTab("manual"), 500);
-        }
+    const winBtn = document.getElementById("cc-man-submit-win");
+    const lossBtn = document.getElementById("cc-man-submit-loss");
+    if (winBtn && hasTracked) {
+      winBtn.addEventListener("click", () => {
+        sendWS("submit_match", { kills: tracked.kills, deaths: tracked.deaths, headshots: tracked.headshots, won: true });
+        addNotification("Submitted: " + tracked.kills + "K/" + tracked.deaths + "D/" + tracked.headshots + "HS as WIN", "achievement");
+        matchTracking = { inMatch: false, kills: 0, deaths: 0, headshots: 0, won: false, matchStart: 0, lastKnownKills: 0, lastKnownDeaths: 0, lastKnownHeadshots: 0 };
+        setTimeout(() => renderTab("manual"), 500);
+      });
+    }
+    if (lossBtn && hasTracked) {
+      lossBtn.addEventListener("click", () => {
+        sendWS("submit_match", { kills: tracked.kills, deaths: tracked.deaths, headshots: tracked.headshots, won: false });
+        addNotification("Submitted: " + tracked.kills + "K/" + tracked.deaths + "D/" + tracked.headshots + "HS as LOSS", "achievement");
+        matchTracking = { inMatch: false, kills: 0, deaths: 0, headshots: 0, won: false, matchStart: 0, lastKnownKills: 0, lastKnownDeaths: 0, lastKnownHeadshots: 0 };
+        setTimeout(() => renderTab("manual"), 500);
       });
     }
 
@@ -1160,11 +1148,8 @@
     if (autoBtn) {
       autoBtn.addEventListener("click", () => {
         autoDetectMatchStats();
-        document.getElementById("cc-man-kills").value = matchTracking.kills;
-        document.getElementById("cc-man-deaths").value = matchTracking.deaths;
-        document.getElementById("cc-man-hs").value = matchTracking.headshots;
-        document.getElementById("cc-man-won").value = matchTracking.won ? "true" : "false";
         addNotification("Stats auto-detected: " + matchTracking.kills + "K/" + matchTracking.deaths + "D/" + matchTracking.headshots + "HS", "info");
+        setTimeout(() => renderTab("manual"), 300);
       });
     }
   }
