@@ -15,6 +15,7 @@
         <a href="#" class="nav-link" data-page="players">Players</a>
         <a href="#" class="nav-link" data-page="stats">Stats</a>
         <a href="#" class="nav-link" data-page="season">Season</a>
+        <a href="#" class="nav-link" data-page="plugin">Plugin</a>
       </nav>
       <div class="header-right">
         <span id="status-indicator" class="status-offline">OFFLINE</span>
@@ -110,6 +111,48 @@
         <h3>Rank Tiers</h3>
         <div id="rank-tiers" class="rank-tiers">
           <div class="empty-state">Loading tiers...</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="page-plugin" class="page">
+      <div class="page-header">
+        <h2>Get the Plugin</h2>
+      </div>
+      <div class="plugin-container">
+        <div class="plugin-card">
+          <div class="plugin-icon">&#9889;</div>
+          <h3>Cryzen Comp Tampermonkey Script</h3>
+          <p>Adds a competitive ranking GUI overlay to Cryzen.io. Tracks kills, deaths, headshots, wins, and losses automatically. View your rank, stats, match history, and leaderboards in-game.</p>
+          <div class="plugin-features">
+            <div class="plugin-feature">&#10003; Auto-tracking kills / deaths / headshots</div>
+            <div class="plugin-feature">&#10003; Live rank display with progress bar</div>
+            <div class="plugin-feature">&#10003; Match history with point breakdowns</div>
+            <div class="plugin-feature">&#10003; In-game leaderboard viewer</div>
+            <div class="plugin-feature">&#10003; Manual match submit fallback</div>
+            <div class="plugin-feature">&#10003; Season progress tracking</div>
+          </div>
+          <div class="plugin-steps">
+            <h4>How to Install</h4>
+            <div class="step">
+              <span class="step-num">1</span>
+              <span>Install <a href="https://www.tampermonkey.net/" target="_blank">Tampermonkey</a> browser extension</span>
+            </div>
+            <div class="step">
+              <span class="step-num">2</span>
+              <span>Click the download button below</span>
+            </div>
+            <div class="step">
+              <span class="step-num">3</span>
+              <span>Tampermonkey will open - click <strong>Install</strong></span>
+            </div>
+            <div class="step">
+              <span class="step-num">4</span>
+              <span>Go to <a href="https://cryzen.io" target="_blank">cryzen.io</a> and press <strong>F2</strong> to open the GUI</span>
+            </div>
+          </div>
+          <a href="/plugin/cryzen-comp.user.js" class="plugin-download-btn">Download Script</a>
+          <div class="plugin-wss">WSS: <code>wss://cryzen-io-competitive.onrender.com/ws</code></div>
         </div>
       </div>
     </div>

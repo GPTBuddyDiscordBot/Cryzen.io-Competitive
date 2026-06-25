@@ -181,6 +181,10 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok", uptime: process.uptime(), clients: connectedClients.size });
 });
 
+app.get("/plugin/cryzen-comp.user.js", (req, res) => {
+  res.sendFile(path.join(__dirname, "..", "tampermonkey", "cryzen-comp.js"));
+});
+
 async function start() {
   await database.init();
   seasons.initSeason(database);
