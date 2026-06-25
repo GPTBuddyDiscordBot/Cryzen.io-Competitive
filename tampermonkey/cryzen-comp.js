@@ -17,7 +17,7 @@
 (function () {
   "use strict";
 
-  const WSS_URL = GM_getValue("wss_url", "wss://localhost:10000/ws");
+  const WSS_URL = GM_getValue("wss_url", "wss://cryzen-io-competitive.onrender.com/");
   const HOTKEY_TOGGLE = GM_getValue("hotkey", "F2");
 
   const RANKS = [
