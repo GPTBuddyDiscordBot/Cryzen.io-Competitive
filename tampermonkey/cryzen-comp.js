@@ -795,7 +795,8 @@
   function renderProfile(body) {
     if (!profile) {
       body.innerHTML = `<div class="cc-login-panel"><p style="color:#888;">Connect to start tracking</p><button id="cc-register-btn">Register / Login</button></div>`;
-      document.getElementById("cc-register-btn")?.onclick = doRegister;
+      const regBtn = document.getElementById("cc-register-btn");
+      if (regBtn) regBtn.onclick = doRegister;
       return;
     }
 
