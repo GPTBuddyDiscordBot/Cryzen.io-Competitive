@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cryzen Comp - Leaderboard</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <h1>CRYZEN <span class="accent">COMP</span></h1>
+      <nav>
+        <a href="#" class="nav-link active" data-page="leaderboard">Leaderboard</a>
+        <a href="#" class="nav-link" data-page="players">Players</a>
+        <a href="#" class="nav-link" data-page="stats">Stats</a>
+        <a href="#" class="nav-link" data-page="season">Season</a>
+      </nav>
+      <div class="header-right">
+        <span id="status-indicator" class="status-offline">OFFLINE</span>
+        <button id="refresh-btn">Refresh</button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <div id="page-leaderboard" class="page active">
+      <div class="page-header">
+        <h2>Season Leaderboard</h2>
+        <div class="tabs">
+          <button class="tab active" data-lb="season">Season</button>
+          <button class="tab" data-lb="lifetime">Lifetime</button>
+          <button class="tab" data-lb="kills">Most Kills</button>
+          <button class="tab" data-lb="wins">Most Wins</button>
+        </div>
+      </div>
+      <div class="leaderboard-container">
+        <div class="lb-header">
+          <span class="col-rank">#</span>
+          <span class="col-tier">Tier</span>
+          <span class="col-name">Player</span>
+          <span class="col-points">Points</span>
+          <span class="col-kd">K/D</span>
+          <span class="col-wr">Win Rate</span>
+          <span class="col-matches">Matches</span>
+        </div>
+        <div id="leaderboard-entries" class="lb-entries">
+          <div class="lb-empty">Loading leaderboard...</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="page-players" class="page">
+      <div class="page-header">
+        <h2>Player Lookup</h2>
+        <div class="search-box">
+          <input type="text" id="player-search" placeholder="Enter username..." />
+          <button id="player-search-btn">Search</button>
+        </div>
+      </div>
+      <div id="player-profile" class="player-profile-container">
+        <div class="empty-state">Search for a player to view their profile</div>
+      </div>
+    </div>
+
+    <div id="page-stats" class="page">
+      <div class="page-header">
+        <h2>Global Statistics</h2>
+      </div>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-number" id="stat-players">--</div>
+          <div class="stat-label">Total Players</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-number" id="stat-matches">--</div>
+          <div class="stat-label">Total Matches</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-number" id="stat-clients">--</div>
+          <div class="stat-label">Online Clients</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-number" id="stat-uptime">--</div>
+          <div class="stat-label">Server Uptime</div>
+        </div>
+      </div>
+      <div class="section">
+        <h3>Rank Distribution</h3>
+        <div id="rank-distribution" class="rank-distribution">
+          <div class="empty-state">Loading distribution...</div>
+        </div>
+      </div>
+      <div class="section">
+        <h3>Recent Activity</h3>
+        <div id="recent-activity" class="recent-activity">
+          <div class="empty-state">Loading recent activity...</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="page-season" class="page">
+      <div class="page-header">
+        <h2>Season Info</h2>
+      </div>
+      <div id="season-info" class="season-info-container">
+        <div class="empty-state">Loading season info...</div>
+      </div>
+      <div class="section">
+        <h3>Rank Tiers</h3>
+        <div id="rank-tiers" class="rank-tiers">
+          <div class="empty-state">Loading tiers...</div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <div id="toast-container"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

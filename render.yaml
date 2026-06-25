@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: cryzen-comp-server
+    runtime: node
+    buildCommand: cd backend && npm install
+    startCommand: cd backend && npm start
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: NODE_ENV
+        value: production
+      - key: DB_PATH
+        value: /opt/render/project/src/backend/cryzen_comp.db
+    plan: free
+    healthCheckPath: /api/health
