@@ -16,7 +16,7 @@ const server = http.createServer(app);
 
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, "..", "dashboard")));
+app.use(express.static(path.join(__dirname, "public")));
 
 const connectedClients = new Map();
 
