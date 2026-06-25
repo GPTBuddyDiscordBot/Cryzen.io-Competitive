@@ -231,6 +231,7 @@
     interceptWebSocket();
     startDOMTracking();
     startPeriodicTracking();
+    scanGameState();
   }
 
   function interceptWebSocket() {
@@ -243,25 +244,23 @@
 
       if (url && !url.includes("cryzen-comp") && !url.includes("10000")) {
         gameWSSockets.push(socket);
-        const origOnMsg = socket.onmessage;
-        let buffer = [];
 
         socket.addEventListener("message", (event) => {
           try {
             if (event.data instanceof Blob) {
               event.data.arrayBuffer().then(buf => {
-                parseColyseusMessage(buf, socket.url);
+                handleColyseusBuffer(buf, socket.url);
               });
             } else if (typeof event.data === "string") {
-              const str = event.data;
-              if (str.startsWith("{")) {
+              if (event.data.startsWith("{")) {
                 try {
-                  const json = JSON.parse(str);
-                  detectFromColyseusJSON(json);
+                  const json = JSON.parse(event.data);
+                  if (json.type === "join_room" || json.type === "join") onMatchStart();
+                  if (json.type === "leave_room" || json.type === "leave") onMatchEnd(false);
                 } catch {}
               }
             } else if (event.data instanceof ArrayBuffer || ArrayBuffer.isView(event.data)) {
-              parseColyseusMessage(event.data, socket.url);
+              handleColyseusBuffer(event.data, socket.url);
             }
           } catch {}
         });
@@ -278,96 +277,206 @@
     window._cryzenCompWSIntercepted = true;
   }
 
-  function parseColyseusMessage(buf, url) {
+  function handleColyseusBuffer(buf) {
     try {
       const view = new Uint8Array(buf);
       if (view.length < 2) return;
       const opcode = view[0];
-      // Colyseus opcodes: 1=JOIN_ROOM, 2=LEAVE_ROOM, 3=ROOM_STATE, 4=ROOM_STATE_UPDATE, etc.
-      if (opcode === 1) {
-        onMatchStart();
-      } else if (opcode === 2) {
-        onMatchEnd(false);
+      if (opcode === 1) { onMatchStart(); }
+      if (opcode === 2) { onMatchEnd(false); }
+      if (opcode === 3 || opcode === 4) {
+        extractColyseusState(view);
       }
     } catch {}
   }
 
-  function detectFromColyseusJSON(json) {
-    if (json.type === "join_room" || json.type === "join") onMatchStart();
-    if (json.type === "leave_room" || json.type === "leave") onMatchEnd(false);
+  function extractColyseusState(view) {
+    try {
+      const text = new TextDecoder().decode(view);
+      const patterns = [
+        /"kills"\s*:\s*(\d+)/gi,
+        /"deaths"\s*:\s*(\d+)/gi,
+        /"headshots"\s*:\s*(\d+)/gi,
+        /"score"\s*:\s*(\d+)/gi,
+        /"won"\s*:\s*(true|false)/gi,
+        /"winner"\s*:\s*(true|false)/gi,
+      ];
+      let foundKills = 0, foundDeaths = 0, foundHS = 0;
+      for (const match of text.matchAll(/"kills"\s*:\s*(\d+)/gi)) {
+        foundKills = Math.max(foundKills, parseInt(match[1]));
+      }
+      for (const match of text.matchAll(/"deaths"\s*:\s*(\d+)/gi)) {
+        foundDeaths = Math.max(foundDeaths, parseInt(match[1]));
+      }
+      for (const match of text.matchAll(/"headshots"\s*:\s*(\d+)/gi)) {
+        foundHS = Math.max(foundHS, parseInt(match[1]));
+      }
+      if (foundKills > matchTracking.lastKnownKills && matchTracking.inMatch) {
+        matchTracking.kills += foundKills - matchTracking.lastKnownKills;
+        matchTracking.lastKnownKills = foundKills;
+      }
+      if (foundDeaths > matchTracking.lastKnownDeaths && matchTracking.inMatch) {
+        matchTracking.deaths += foundDeaths - matchTracking.lastKnownDeaths;
+        matchTracking.lastKnownDeaths = foundDeaths;
+      }
+      if (foundHS > matchTracking.lastKnownHeadshots && matchTracking.inMatch) {
+        matchTracking.headshots += foundHS - matchTracking.lastKnownHeadshots;
+        matchTracking.lastKnownHeadshots = foundHS;
+      }
+    } catch {}
   }
 
   function startDOMTracking() {
     const appEl = document.getElementById("app");
-    if (!appEl) return;
+    if (!appEl) {
+      setTimeout(startDOMTracking, 1000);
+      return;
+    }
 
-    const observer = new MutationObserver((mutations) => {
+    const observer = new MutationObserver(() => {
       detectDOMChanges();
     });
 
     observer.observe(appEl, { childList: true, subtree: true, characterData: true });
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
 
     detectDOMChanges();
   }
 
+  let lastDeathScreenSeen = 0;
+  let lastMatchEndSeen = 0;
+  let lastKillFeedText = "";
+
   function detectDOMChanges() {
-    detectDeathScreen();
-    detectMatchEnd();
-    detectKillFeed();
-    detectMatchStart();
+    detectMatchStartDOM();
+    detectDeathScreenDOM();
+    detectMatchEndDOM();
+    detectKillFeedDOM();
+    detectScoreboardDOM();
   }
 
-  function detectDeathScreen() {
-    const deathEls = document.querySelectorAll('[class*="death"], [class*="Death"], [class*="kill-screen"], [class*="dead"]');
-    for (const el of deathEls) {
+  function detectMatchStartDOM() {
+    if (matchTracking.inMatch) return;
+    const gameEls = document.querySelectorAll('[class*="game"], [class*="Game"], canvas');
+    let visibleGameEls = 0;
+    for (const el of gameEls) {
+      if (el.offsetHeight > 400 && el.offsetWidth > 400) visibleGameEls++;
+    }
+    if (visibleGameEls >= 1) {
+      onMatchStart();
+    }
+  }
+
+  function detectDeathScreenDOM() {
+    if (!matchTracking.inMatch) return;
+    const now = Date.now();
+    if (now - lastDeathScreenSeen < 3000) return;
+
+    const allEls = document.querySelectorAll("*");
+    for (const el of allEls) {
+      const cls = (el.className || "").toString().toLowerCase();
+      const text = (el.textContent || "").toLowerCase();
       if (el.offsetHeight > 0 && el.offsetWidth > 0) {
-        matchTracking.deaths++;
-        addNotification("Death detected", "info");
-      }
-    }
-  }
-
-  function detectMatchEnd() {
-    const resultEls = document.querySelectorAll('[class*="result"], [class*="match-end"], [class*="reward"], [class*="Reward"], [class*="end-screen"]');
-    for (const el of resultEls) {
-      if (el.offsetHeight > 0 && el.offsetWidth > 0 && matchTracking.inMatch) {
-        // Check if we won by looking for winner indicators
-        const winnerText = el.textContent || "";
-        if (winnerText.includes("WIN") || winnerText.includes("Victory") || winnerText.includes("1st") || winnerText.includes("winner")) {
-          matchTracking.won = true;
+        if ((cls.includes("death") || cls.includes("dead") || cls.includes("respawn") || cls.includes("kill-screen")) &&
+            (text.includes("respawn") || text.includes("death") || text.includes("killed") || text.includes("dead") || text.includes("click to"))) {
+          matchTracking.deaths++;
+          lastDeathScreenSeen = now;
+          addNotification("Death detected", "info");
+          updateGUI();
+          return;
         }
-        onMatchEnd(matchTracking.won);
-        break;
       }
     }
   }
 
-  function detectKillFeed() {
-    const chatEls = document.querySelectorAll('[class*="chat"], [class*="kill-feed"], [class*="Kill"]');
-    for (const chat of chatEls) {
-      const killEntries = chat.querySelectorAll('[class*="kill"], [class*="entry"], [class*="message"]');
-      if (killEntries.length > lastKillFeedEntries && matchTracking.inMatch) {
-        const newEntries = killEntries.length - lastKillFeedEntries;
-        for (let i = lastKillFeedEntries; i < killEntries.length; i++) {
-          const text = killEntries[i].textContent || "";
-          if (text.includes("headshot") || text.includes("Headshot") || text.includes("HS")) {
-            matchTracking.kills++;
-            matchTracking.headshots++;
-          } else if (text.length > 0 && !text.includes("death") && !text.includes("Death")) {
-            matchTracking.kills++;
+  function detectMatchEndDOM() {
+    if (!matchTracking.inMatch) return;
+    const now = Date.now();
+    if (now - lastMatchEndSeen < 5000) return;
+
+    const allEls = document.querySelectorAll("*");
+    for (const el of allEls) {
+      const cls = (el.className || "").toString().toLowerCase();
+      const text = (el.textContent || "").toLowerCase();
+      if (el.offsetHeight > 0 && el.offsetWidth > 0) {
+        if (cls.includes("reward") || cls.includes("result") || cls.includes("end-screen") || cls.includes("match-end")) {
+          if (text.includes("reward") || text.includes("match") || text.includes("result") || text.includes("xp") || text.includes("credit") || text.includes("claim")) {
+            const won = text.includes("win") || text.includes("victory") || text.includes("1st") || text.includes("defeated");
+            lastMatchEndSeen = now;
+            onMatchEnd(won);
+            return;
           }
         }
-        lastKillFeedEntries = killEntries.length;
+        if (text.includes("match result") || text.includes("match ended") || text.includes("reward claim")) {
+          const won = text.includes("win") || text.includes("victory");
+          lastMatchEndSeen = now;
+          onMatchEnd(won);
+          return;
+        }
       }
     }
   }
 
-  function detectMatchStart() {
-    const loadingEls = document.querySelectorAll('[class*="loading"], [class*="Loading"], [class*="game-screen"]');
-    const playBtn = document.querySelector('[class*="play"], [class*="Play"]');
-    for (const el of loadingEls) {
-      if (el.offsetHeight > 0 && el.offsetWidth > 0 && !matchTracking.inMatch) {
-        // Game is loading, might be starting a match
+  function detectKillFeedDOM() {
+    if (!matchTracking.inMatch) return;
+    const allEls = document.querySelectorAll("*");
+    const currentText = [];
+    for (const el of allEls) {
+      const cls = (el.className || "").toString().toLowerCase();
+      if (cls.includes("kill") || cls.includes("death") || cls.includes("chat") || cls.includes("feed") || cls.includes("message") || cls.includes("log")) {
+        const txt = (el.textContent || "").trim();
+        if (txt.length > 0 && txt.length < 200) currentText.push(txt);
+      }
+    }
+    const joined = currentText.join("|");
+    if (joined !== lastKillFeedText && joined.length > 0) {
+      const diff = joined.replace(lastKillFeedText, "");
+      if (diff.length > 0 && matchTracking.inMatch) {
+        const lower = diff.toLowerCase();
+        if (lower.includes("headshot") || lower.includes("head shot")) {
+          matchTracking.kills++;
+          matchTracking.headshots++;
+          updateGUI();
+        } else if (lower.includes("killed") || (lower.includes("kill") && !lower.includes("death"))) {
+          matchTracking.kills++;
+          updateGUI();
+        }
+      }
+      lastKillFeedText = joined;
+    }
+  }
+
+  function detectScoreboardDOM() {
+    if (!matchTracking.inMatch) return;
+    const allEls = document.querySelectorAll("*");
+    for (const el of allEls) {
+      const cls = (el.className || "").toString().toLowerCase();
+      if (cls.includes("score") || cls.includes("board") || cls.includes("tab")) {
+        const text = (el.textContent || "").toLowerCase();
+        const killMatches = text.match(/kills?[:\s]*(\d+)/i);
+        const deathMatches = text.match(/deaths?[:\s]*(\d+)/i);
+        const hsMatches = text.match(/headshots?[:\s]*(\d+)/i);
+        if (killMatches) {
+          const k = parseInt(killMatches[1]);
+          if (k > matchTracking.lastKnownKills) {
+            matchTracking.kills += k - matchTracking.lastKnownKills;
+            matchTracking.lastKnownKills = k;
+          }
+        }
+        if (deathMatches) {
+          const d = parseInt(deathMatches[1]);
+          if (d > matchTracking.lastKnownDeaths) {
+            matchTracking.deaths += d - matchTracking.lastKnownDeaths;
+            matchTracking.lastKnownDeaths = d;
+          }
+        }
+        if (hsMatches) {
+          const h = parseInt(hsMatches[1]);
+          if (h > matchTracking.lastKnownHeadshots) {
+            matchTracking.headshots += h - matchTracking.lastKnownHeadshots;
+            matchTracking.lastKnownHeadshots = h;
+          }
+        }
       }
     }
   }
@@ -386,69 +495,124 @@
       lastKnownHeadshots: 0,
     };
     lastKillFeedEntries = 0;
+    lastKillFeedText = "";
+    lastDeathScreenSeen = 0;
+    lastMatchEndSeen = 0;
     addNotification("Match started - tracking stats", "info");
     updateGUI();
+    scheduleStateScan();
   }
 
   function onMatchEnd(won) {
     if (!matchTracking.inMatch) return;
     matchTracking.won = won;
-    addNotification(`Match ended - ${won ? "WIN" : "LOSS"}: ${matchTracking.kills}K/${matchTracking.deaths}D/${matchTracking.headshots}HS`, won ? "achievement" : "info");
-    submitMatchResult();
-    updateGUI();
+    if (matchTracking.kills === 0 && matchTracking.deaths === 0) {
+      autoDetectMatchStats();
+    }
+    setTimeout(() => {
+      addNotification(`Match ended - ${matchTracking.won ? "WIN" : "LOSS"}: ${matchTracking.kills}K/${matchTracking.deaths}D/${matchTracking.headshots}HS`, matchTracking.won ? "achievement" : "info");
+      submitMatchResult();
+      updateGUI();
+    }, 1500);
+  }
+
+  function autoDetectMatchStats() {
+    try {
+      const allText = document.body.textContent || "";
+      const killMatches = allText.match(/kills?[:\s]*(\d+)/gi);
+      const deathMatches = allText.match(/deaths?[:\s]*(\d+)/gi);
+      const hsMatches = allText.match(/headshots?[:\s]*(\d+)/gi);
+      if (killMatches) {
+        for (const m of killMatches) {
+          const n = parseInt(m.match(/\d+/)[0]);
+          if (n > matchTracking.kills) matchTracking.kills = n;
+        }
+      }
+      if (deathMatches) {
+        for (const m of deathMatches) {
+          const n = parseInt(m.match(/\d+/)[0]);
+          if (n > matchTracking.deaths) matchTracking.deaths = n;
+        }
+      }
+      if (hsMatches) {
+        for (const m of hsMatches) {
+          const n = parseInt(m.match(/\d+/)[0]);
+          if (n > matchTracking.headshots) matchTracking.headshots = n;
+        }
+      }
+    } catch {}
+  }
+
+  function scanGameState() {
+    try {
+      const appEl = document.getElementById("app");
+      if (!appEl || !appEl.__vue_app__) return;
+      const pinia = appEl.__vue_app__?.config?.globalProperties?.$pinia;
+      if (!pinia) return;
+      const stores = pinia._s;
+      for (const [name, store] of stores) {
+        deepScanObject(store, name);
+      }
+    } catch {}
+  }
+
+  function deepScanObject(obj, path, depth) {
+    if (!depth) depth = 0;
+    if (depth > 10 || !obj || typeof obj !== "object") return;
+    try {
+      const state = obj.$state || obj;
+      if (matchTracking.inMatch && typeof state.kills === "number" && state.kills > matchTracking.lastKnownKills) {
+        matchTracking.kills += state.kills - matchTracking.lastKnownKills;
+        matchTracking.lastKnownKills = state.kills;
+        updateGUI();
+      }
+      if (matchTracking.inMatch && typeof state.deaths === "number" && state.deaths > matchTracking.lastKnownDeaths) {
+        matchTracking.deaths += state.deaths - matchTracking.lastKnownDeaths;
+        matchTracking.lastKnownDeaths = state.deaths;
+        updateGUI();
+      }
+      if (matchTracking.inMatch && typeof state.headshots === "number" && state.headshots > matchTracking.lastKnownHeadshots) {
+        matchTracking.headshots += state.headshots - matchTracking.lastKnownHeadshots;
+        matchTracking.lastKnownHeadshots = state.headshots;
+        updateGUI();
+      }
+      if (typeof state.inGame === "boolean" && !state.inGame && matchTracking.inMatch) {
+        matchTracking.won = state.isWinner || state.won || false;
+        onMatchEnd(matchTracking.won);
+        return;
+      }
+      if (typeof state === "object") {
+        for (const key of Object.keys(state)) {
+          if (key === "$state" || key === "_s" || key === "$pinia" || key.startsWith("$") || key.startsWith("_")) continue;
+          try {
+            const val = state[key];
+            if (val && typeof val === "object") deepScanObject(val, path + "." + key, depth + 1);
+          } catch {}
+        }
+      }
+    } catch {}
   }
 
   function startPeriodicTracking() {
     periodicTracker = setInterval(() => {
       if (!matchTracking.inMatch) return;
-      tryTrackFromVueStore();
-      checkMatchEndConditions();
-    }, 2000);
+      scanGameState();
+      detectDOMChanges();
+    }, 1500);
   }
 
-  function tryTrackFromVueStore() {
-    try {
-      const appEl = document.getElementById("app");
-      if (!appEl || !appEl.__vue_app__) return;
-      const pinia = appEl.__vue_app__?.config?.globalProperties?.$pinia;
-      if (!pinia) return;
-
-      const stores = pinia._s;
-      for (const [name, store] of stores) {
-        const state = store.$state || store;
-        if (state.kills && typeof state.kills === "number" && state.kills > matchTracking.lastKnownKills) {
-          matchTracking.kills += state.kills - matchTracking.lastKnownKills;
-          matchTracking.lastKnownKills = state.kills;
-        }
-        if (state.deaths && typeof state.deaths === "number" && state.deaths > matchTracking.lastKnownDeaths) {
-          matchTracking.deaths += state.deaths - matchTracking.lastKnownDeaths;
-          matchTracking.lastKnownDeaths = state.deaths;
-        }
-        if (state.headshots && typeof state.headshots === "number" && state.headshots > matchTracking.lastKnownHeadshots) {
-          matchTracking.headshots += state.headshots - matchTracking.lastKnownHeadshots;
-          matchTracking.lastKnownHeadshots = state.headshots;
-        }
+  function scheduleStateScan() {
+    let scans = 0;
+    const maxScans = 60;
+    const scanInterval = setInterval(() => {
+      if (!matchTracking.inMatch || scans >= maxScans) {
+        clearInterval(scanInterval);
+        return;
       }
-    } catch {}
-  }
-
-  function checkMatchEndConditions() {
-    try {
-      const appEl = document.getElementById("app");
-      if (!appEl || !appEl.__vue_app__) return;
-      const pinia = appEl.__vue_app__?.config?.globalProperties?.$pinia;
-      if (!pinia) return;
-
-      const stores = pinia._s;
-      for (const [name, store] of stores) {
-        const state = store.$state || store;
-        if (state.inGame === false && matchTracking.inMatch) {
-          matchTracking.won = state.isWinner || state.won || false;
-          onMatchEnd(matchTracking.won);
-          return;
-        }
-      }
-    } catch {}
+      scanGameState();
+      detectDOMChanges();
+      scans++;
+    }, 1000);
   }
 
   // === GUI ===
@@ -952,22 +1116,41 @@
   }
 
   function renderManualSubmit(body) {
+    const tracked = matchTracking;
+    const hasTracked = tracked.kills > 0 || tracked.deaths > 0;
     body.innerHTML = `
       <div class="cc-section">
-        <div class="cc-section-title">Manual Match Submit</div>
-        <p style="font-size:11px;color:#888;margin-bottom:8px;">If auto-tracking misses a match, submit manually.</p>
-        <div class="cc-manual-form">
-          <label>Kills</label><input type="number" id="cc-man-kills" value="0" min="0">
-          <label>Deaths</label><input type="number" id="cc-man-deaths" value="0" min="0">
-          <label>Headshots</label><input type="number" id="cc-man-hs" value="0" min="0">
-          <label>Result</label>
-          <select id="cc-man-won">
-            <option value="true">Win</option>
-            <option value="false">Loss</option>
-          </select>
-          <br>
-          <button class="cc-manual-submit-btn" id="cc-man-submit">Submit Match</button>
-        </div>
+        <div class="cc-section-title">Auto-Tracked Match</div>
+        ${hasTracked ? `
+          <p style="font-size:11px;color:#888;margin-bottom:8px;">Last detected match stats. Click to submit.</p>
+          <div class="cc-manual-form">
+            <label>Kills</label><input type="number" id="cc-man-kills" value="${tracked.kills}" min="0">
+            <label>Deaths</label><input type="number" id="cc-man-deaths" value="${tracked.deaths}" min="0">
+            <label>Headshots</label><input type="number" id="cc-man-hs" value="${tracked.headshots}" min="0">
+            <label>Result</label>
+            <select id="cc-man-won">
+              <option value="true" ${tracked.won ? "selected" : ""}>Win</option>
+              <option value="false" ${!tracked.won ? "selected" : ""}>Loss</option>
+            </select>
+            <br>
+            <button class="cc-manual-submit-btn" id="cc-man-submit">Submit This Match</button>
+          </div>
+        ` : `
+          <p style="font-size:11px;color:#888;margin-bottom:8px;">No tracked match data yet. Enter manually or wait for auto-detection.</p>
+          <div class="cc-manual-form">
+            <label>Kills</label><input type="number" id="cc-man-kills" value="0" min="0">
+            <label>Deaths</label><input type="number" id="cc-man-deaths" value="0" min="0">
+            <label>Headshots</label><input type="number" id="cc-man-hs" value="0" min="0">
+            <label>Result</label>
+            <select id="cc-man-won">
+              <option value="true">Win</option>
+              <option value="false">Loss</option>
+            </select>
+            <br>
+            <button class="cc-manual-submit-btn" id="cc-man-submit">Submit Match</button>
+          </div>
+        `}
+        <button class="cc-manual-submit-btn" id="cc-man-autodetect" style="background:#444;margin-top:8px;display:block;">Auto-Detect From Page</button>
       </div>
       <div class="cc-section">
         <div class="cc-section-title">Connection</div>
@@ -985,14 +1168,33 @@
       </div>
     `;
 
-    document.getElementById("cc-man-submit")?.addEventListener("click", () => {
-      const kills = parseInt(document.getElementById("cc-man-kills").value) || 0;
-      const deaths = parseInt(document.getElementById("cc-man-deaths").value) || 0;
-      const headshots = parseInt(document.getElementById("cc-man-hs").value) || 0;
-      const won = document.getElementById("cc-man-won").value === "true";
-      sendWS("submit_match", { kills, deaths, headshots, won });
-      addNotification("Manual match submitted", "info");
-    });
+    const submitBtn = document.getElementById("cc-man-submit");
+    if (submitBtn) {
+      submitBtn.addEventListener("click", () => {
+        const kills = parseInt(document.getElementById("cc-man-kills").value) || 0;
+        const deaths = parseInt(document.getElementById("cc-man-deaths").value) || 0;
+        const headshots = parseInt(document.getElementById("cc-man-hs").value) || 0;
+        const won = document.getElementById("cc-man-won").value === "true";
+        sendWS("submit_match", { kills, deaths, headshots, won });
+        addNotification("Match submitted: " + kills + "K/" + deaths + "D/" + headshots + "HS", "achievement");
+        if (hasTracked) {
+          matchTracking = { inMatch: false, kills: 0, deaths: 0, headshots: 0, won: false, matchStart: 0, lastKnownKills: 0, lastKnownDeaths: 0, lastKnownHeadshots: 0 };
+          setTimeout(() => renderTab("manual"), 500);
+        }
+      });
+    }
+
+    const autoBtn = document.getElementById("cc-man-autodetect");
+    if (autoBtn) {
+      autoBtn.addEventListener("click", () => {
+        autoDetectMatchStats();
+        document.getElementById("cc-man-kills").value = matchTracking.kills;
+        document.getElementById("cc-man-deaths").value = matchTracking.deaths;
+        document.getElementById("cc-man-hs").value = matchTracking.headshots;
+        document.getElementById("cc-man-won").value = matchTracking.won ? "true" : "false";
+        addNotification("Stats auto-detected: " + matchTracking.kills + "K/" + matchTracking.deaths + "D/" + matchTracking.headshots + "HS", "info");
+      });
+    }
   }
 
   function updateGUI() {
@@ -1039,6 +1241,22 @@
       const gui = document.getElementById("cryzen-comp-gui");
       gui?.classList.toggle("visible", guiVisible);
       updateGUI();
+    }
+    if (e.key === "F3" || e.code === "F3") {
+      e.preventDefault();
+      if (matchTracking.inMatch) {
+        matchTracking.won = confirm("Did you win? (OK=Win, Cancel=Loss)");
+        onMatchEnd(matchTracking.won);
+      } else if (matchTracking.kills > 0 || matchTracking.deaths > 0) {
+        const won = confirm("Submit tracked match as WIN? (OK=Win, Cancel=Loss)");
+        matchTracking.won = won;
+        addNotification(`Submitting: ${matchTracking.kills}K/${matchTracking.deaths}D/${matchTracking.headshots}HS as ${won ? "WIN" : "LOSS"}`, "info");
+        sendWS("submit_match", { kills: matchTracking.kills, deaths: matchTracking.deaths, headshots: matchTracking.headshots, won });
+        matchTracking = { inMatch: false, kills: 0, deaths: 0, headshots: 0, won: false, matchStart: 0, lastKnownKills: 0, lastKnownDeaths: 0, lastKnownHeadshots: 0 };
+        updateGUI();
+      } else {
+        addNotification("No match data to submit yet", "error");
+      }
     }
   });
 
